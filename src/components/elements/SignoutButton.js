@@ -8,7 +8,7 @@ export default function SignoutButton() {
   return (
     <>
       <form action={action}>
-        <Button disabled={isPending || state} className="w-full" type="submit">
+        <Button variant='outline' disabled={isPending || state} className="w-full" type="submit">
           {isPending ? <Spinner /> : "Sign out"}
         </Button>
       </form>

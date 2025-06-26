@@ -5,7 +5,6 @@ export default async function page({ params, searchParams }) {
   return (
     <>
       <div> this is from page </div>
-      <SignoutButton/>
     </>
   );
 }
