@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
-import { signupSchema } from "@/helper/server-side-validator/validator";
-import { signinSchema } from "@/helper/server-side-validator/validator";
+import { signupSchema } from "@/helper/server-side/validator";
+import { signinSchema } from "@/helper/server-side/validator";
 
 const allowedFields = ["email", "firstName", "lastName", "_id"];
 const UserSchema = new mongoose.Schema(
@@ -106,6 +106,7 @@ const UserSchema = new mongoose.Schema(
 
 // Add index for suspended/attempt-based queries (optional)
 
+//pre save middleware
 UserSchema.pre("save", async function (next) {
   try {
     if (this.isModified("password")) {
@@ -122,43 +123,54 @@ UserSchema.pre("save", async function (next) {
 
 //static method signup
 UserSchema.statics.signup = async function (signupData) {
-  try {
-    const parsedData = await signupSchema.safeParseAsync(signupData);
-    if (!parsedData.success) {
-      throw new Error("Invalid input");
+  class SignupError extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "SignupError";
     }
-    const { email, password, firstName, lastName } = parsedData.data;
-
-    const user = await this.findOne({ email });
-
-    //ifUser
-    if (user) {
-      throw new Error("Email is registered");
-    }
-
-    return await this.create({ email, password, firstName, lastName });
-    //
-  } catch (err) {
-    throw err;
   }
+  const parsedData = await signupSchema.safeParseAsync(signupData);
+  if (!parsedData.success) {
+    throw new SignupError("Invalid input");
+  }
+  const { email, password, firstName, lastName } = parsedData.data;
+
+  const user = await this.findOne({ email });
+
+  //ifUser
+  if (user) {
+    throw new SignupError("Email is already registered");
+  }
+
+  return await this.create({ email, password, firstName, lastName });
+  //
 };
 
 //static method signin
 UserSchema.statics.signin = async function (signinData) {
+  class SigninError extends Error {
+    constructor(path, message, suspendedTill, email) {
+      super(message);
+      this.name = "SigninError";
+      this.path = path;
+      this.suspendedTill = suspendedTill;
+      this.email = email;
+    }
+  }
   const parsedData = await signinSchema.safeParseAsync(signinData);
   if (!parsedData.success) {
-    throw new Error("Invalid input");
+    throw new SigninError("email", "Invalid input");
   }
 
   const { email, password } = parsedData.data;
   const user = await this.findOne({ email });
 
   if (!user) {
-    throw new Error("Email is not registered");
+    throw new SigninError("email", "Email is not registered");
   }
 
   if (user.accountStatus === 3) {
-    throw new Error("This account is permanently banned");
+    throw new SigninError("email", "This account is permanently banned");
   }
 
   if (
@@ -166,13 +178,16 @@ UserSchema.statics.signin = async function (signinData) {
     user.suspendedTill &&
     new Date() < user.suspendedTill
   ) {
-    // const msRemaining = user.suspendedTill - new Date();
-    // const mins = Math.floor(msRemaining / 60000);
-    // const secs = Math.floor((msRemaining % 60000) / 1000);
+    const msRemaining = user.suspendedTill - new Date();
+    const mins = Math.floor(msRemaining / 60000);
+    const secs = Math.floor((msRemaining % 60000) / 1000);
 
-    throw new Error(
-      // `Too many attempts. Try again in ${mins} minute(s) and ${secs} second(s).`
-      "Too many attempts. Try again later"
+    throw new SigninError(
+      "password",
+      `Too many attempts. Try again in ${mins} minute(s) and ${secs} second(s).`,
+      user.suspendedTill,
+      user.email
+      // "Too many attempts. Try again later"
     );
   }
 
@@ -192,33 +207,40 @@ UserSchema.statics.signin = async function (signinData) {
   if (user.loginAttempts >= 10) {
     user.accountStatus = 3;
     await user.save();
-    throw new Error(
+    throw new SigninError(
+      "email",
       "You tried too many times. Your account is permanently banned."
     );
   }
 
   if (user.loginAttempts === 3) {
     user.accountStatus = 2;
-    user.suspendedTill = new Date(Date.now() + 5 * 60 * 1000);
+    //   user.suspendedTill = new Date(Date.now() + 5 * 60 * 1000);
+    user.suspendedTill = new Date(Date.now() + 10 * 1000);
     await user.save();
   }
   if (user.loginAttempts === 5) {
     user.accountStatus = 2;
-    user.suspendedTill = new Date(Date.now() + 25 * 60 * 1000);
+    //   user.suspendedTill = new Date(Date.now() + 25 * 60 * 1000);
+    user.suspendedTill = new Date(Date.now() + 20 * 1000);
     await user.save();
   } // 20 minutes
   if (user.loginAttempts === 7) {
     user.accountStatus = 2;
-    user.suspendedTill = new Date(Date.now() + 1 * 60 * 60 * 1000);
+    //   user.suspendedTill = new Date(Date.now() + 1 * 60 * 60 * 1000);
+    user.suspendedTill = new Date(Date.now() + 30 * 1000);
+
     await user.save();
   }
   if (user.loginAttempts === 9) {
     user.accountStatus = 2;
-    user.suspendedTill = new Date(Date.now() + 6 * 60 * 60 * 1000);
+    //  user.suspendedTill = new Date(Date.now() + 6 * 60 * 60 * 1000);
+    user.suspendedTill = new Date(Date.now() + 40 * 1000);
+
     await user.save();
   }
   await user.save();
-  throw new Error("Invalid password");
+  throw new SigninError("password", "Invalid password");
 };
 
 const User = mongoose.models.User || mongoose.model("User", UserSchema);
